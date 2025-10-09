@@ -301,7 +301,7 @@ cli = [
 [[package]]
 name = "jira-integration"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "jira", extra = ["cli"] },
     { name = "loguru" },
