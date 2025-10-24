@@ -5,18 +5,19 @@ from jira import JIRA
 
 
 class JiraTicket(TypedDict):
+    issue: str
     title: str
     description: str
     creator: str
 
 
 class Task(Protocol):
-    @abc.abstractmethod
     @staticmethod
+    @abc.abstractmethod
     def can_handle(jira_issue: JiraTicket) -> bool:
         raise NotImplementedError
 
-    @abc.abstractmethod
     @staticmethod
+    @abc.abstractmethod
     def execute(jira: JIRA, jira_issue: JiraTicket) -> bool:
         raise NotImplementedError
