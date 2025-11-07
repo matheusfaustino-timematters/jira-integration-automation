@@ -36,9 +36,7 @@ def main():
         task = jira.issue(issue.key)
 
         if task.fields.description in tasks_processed:
-            logger.info(
-                f"Issue skipped because it is duplicated: {issue.key} {task.fields.description}"
-            )
+            logger.info(f"Issue skipped because it is duplicated: {issue.key}")
             continue
 
         tasks_processed.add(task.fields.description)
@@ -51,9 +49,6 @@ def main():
         }
 
         # @TODO update status
-        # trigger script to run things on servers based on the title
-        # add comment with visibility
-        # assign it to me, at first
         process_status = TaskManager.process_issue(jira, ticket)
         if process_status == -1:
             logger.info(f"No Task was trigger for this issue {task.key}")
