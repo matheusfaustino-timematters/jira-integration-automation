@@ -1,7 +1,23 @@
 import abc
+from enum import Enum
 from typing import Protocol, TypedDict
 
 from jira import JIRA
+
+
+# this list was made by fetch jira codes using the python jira lib
+class JiraTransitionCodes(Enum):
+    RESPOND_CUSTOMER = 851
+    IN_PROGRESS = 891
+    ESCALATE = 921
+    APPROVAL_NECESSARY = 951
+    RESOLVE_THIS_ISSUE = 761
+    CANCEL_REQUEST = 901
+    PENDING = 871
+
+
+class JiraAssignUsers(Enum):
+    MATHEUS = "Matheus Faustino"
 
 
 class JiraTicket(TypedDict):
