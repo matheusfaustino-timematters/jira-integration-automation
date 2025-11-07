@@ -1,0 +1,12 @@
+jobs:
+  ReportsFalsePositiveCheck:
+    enabled: true
+
+  ManualTriggerBIC:
+    enabled: true
+
+  ThresholdExceeded:
+    enabled: false
+
+  UPSReport:
+    enabled: false
