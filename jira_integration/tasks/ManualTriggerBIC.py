@@ -7,9 +7,13 @@ from jira import JIRA
 from loguru import logger
 from server import Server, ServerFactory
 
-from jira_integration.types import JiraTicket, Task
+from jira_integration.types import (
+    JiraAssignUsers,
+    JiraTicket,
+    JiraTransitionCodes,
+    Task,
+)
 
-ASSIGN_USER = "Matheus Faustino"
 REPORTS_PATH = "\\SAS Reports"
 TASK_COPY_NAME = "AdHoc_SPL_BIC_5_Copy_Attachments"
 TASK_SEND_NAME = "AdHoc_SPL_BIC_6_Send_Attachments"
@@ -25,14 +29,17 @@ class ManualTriggerBIC(Task):
         return (
             "Manual invoices AX sending in SPL_Invoices_for_BIC".lower()
             in jira_issue["title"].lower()
-            and time(9, 00) <= datetime.now().time() <= time(9, 55)
+            and time(8, 00) <= datetime.now().time() <= time(9, 55)
         )
 
     @staticmethod
     def execute(jira: JIRA, jira_issue: JiraTicket) -> bool:
         logger.info(f"Running ManualTriggerBIC on ticket {jira_issue['issue']}")
 
-        jira.assign_issue(jira_issue["issue"], ASSIGN_USER)
+        jira.assign_issue(jira_issue["issue"], JiraAssignUsers.MATHEUS.value)
+        jira.transition_issue(
+            jira_issue["issue"], JiraTransitionCodes.IN_PROGRESS.value
+        )
         jira.add_comment(
             jira_issue["issue"],
             ":robot: BipBop is taking care of the issue",
@@ -52,6 +59,9 @@ class ManualTriggerBIC(Task):
                 jira_issue["issue"],
                 ":robot: BipBop finished task without errors",
                 is_internal=True,
+            )
+            jira.transition_issue(
+                jira_issue["issue"], JiraTransitionCodes.RESOLVE_THIS_ISSUE.value
             )
 
         return is_success
