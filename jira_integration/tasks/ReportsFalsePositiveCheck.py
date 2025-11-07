@@ -52,8 +52,12 @@ class ReportsFalsePositiveCheck(Task):
         ticket_jira = jira.issue(issue_number)
         attachments = ticket_jira.fields.attachment
         if not len(attachments) == 1:
-            msg = f"For issue {issue_number} Fehler in Ladelauf ticket does not match expectations"
-            logger.error(msg)
+            msg = f"For issue {issue_number} Fehler in Ladelauf ticket does not contain one attachment"
+            jira.add_comment(
+                jira_issue["issue"],
+                msg,
+                is_internal=True,
+            )
             raise Exception(msg)
 
         # rename the period to match sas folder
