@@ -40,6 +40,7 @@ class ReportsFalsePositiveCheck(Task):
 
     @staticmethod
     def execute(jira: JIRA, jira_issue: JiraTicket) -> bool:
+        logger.info(f"Running ReportsFalsePositiveCheck task on {jira_issue['issue']}")
         server: Server = ServerFactory.retrieve_server("tm-sasb1")
 
         # update ticket information
@@ -115,7 +116,8 @@ class ReportsFalsePositiveCheck(Task):
                         comment = ":robot: The table finished with success"
                         jira.transition_issue(
                             jira_issue["issue"],
-                            JiraTransitionCodes.CANCEL_REQUEST.value,
+                            # JiraTransitionCodes.CANCEL_REQUEST.value,
+                            JiraTransitionCodes.IN_PROGRESS.value,
                         )
                     else:
                         comment = ":robot: The table finished with an error. Please, check it."
