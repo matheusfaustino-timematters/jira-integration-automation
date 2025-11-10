@@ -7,6 +7,7 @@ from jira import JIRA
 from loguru import logger
 from server import Server, ServerFactory
 
+from jira_integration.settings import Settings
 from jira_integration.types import (
     JiraAssignUsers,
     JiraTicket,
@@ -25,12 +26,21 @@ CMD_TASK_STATUS_STR = 'Get-ScheduledTask | Where-Object {{ $_.TaskPath -like "{t
 class ManualTriggerBIC(Task):
     @staticmethod
     def can_handle(jira_issue: JiraTicket) -> bool:
-        # @TODO how to handle duplicated tickets
-        return (
+        # get the manual info from the class
+        task_settings = Settings.get_task_setting("ManualTriggerBIC")
+        condition = (
             "Manual invoices AX sending in SPL_Invoices_for_BIC".lower()
             in jira_issue["title"].lower()
             and time(8, 00) <= datetime.now().time() <= time(9, 55)
         )
+
+        if condition and not task_settings["enabled"]:
+            logger.warning(
+                'Task "ManualTriggerBIC" did not run because it is not enabled'
+            )
+            return False
+
+        return condition
 
     @staticmethod
     def execute(jira: JIRA, jira_issue: JiraTicket) -> bool:
