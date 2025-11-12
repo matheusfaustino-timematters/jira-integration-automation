@@ -1,7 +1,6 @@
 import csv
 import io
 from datetime import datetime
-from encodings import latin_1
 
 import pandas as pd
 from jira import JIRA
@@ -18,7 +17,14 @@ from jira_integration.types import (
 
 B1_DIR_REPORT_LOGS_PATH = "D:\\SAS\\Config\\Lev1\\SchedulingServer\\sasadmin\\"
 
-STEERING_TABLE_FOLDER_NAME = {"Reporting_Daily": "Report_Daily"}
+STEERING_TABLE_FOLDER_NAME = {
+    "Reporting_Daily": "Report_Daily",
+    "MDM": "MDM_OSScheduler",
+    "SPL": "SPL_OSScheduler",
+    "SELFBI-DATAMART": "SelfBI_Datamart",
+}
+
+STATUS_IN_PROGRESS = "3"
 
 
 class ReportsFalsePositiveCheck(Task):
@@ -43,14 +49,17 @@ class ReportsFalsePositiveCheck(Task):
         logger.info(f"Running ReportsFalsePositiveCheck task on {jira_issue['issue']}")
         server: Server = ServerFactory.retrieve_server("tm-sasb1")
 
-        # update ticket information
-        jira.assign_issue(jira_issue["issue"], JiraAssignUsers.MATHEUS.value)
-        jira.transition_issue(
-            jira_issue["issue"], JiraTransitionCodes.IN_PROGRESS.value
-        )
-
         issue_number = jira_issue["issue"]
         ticket_jira = jira.issue(issue_number)
+
+        # update ticket information
+        jira.assign_issue(jira_issue["issue"], JiraAssignUsers.MATHEUS.value)
+        # id = 3 is In Progress as STATUS of the ticket (different than transition code)
+        # if ticket_jira.fields.status.id != STATUS_IN_PROGRESS:
+        #     jira.transition_issue(
+        #         jira_issue["issue"], JiraTransitionCodes.IN_PROGRESS.value
+        # )
+
         attachments = ticket_jira.fields.attachment
         if not len(attachments) == 1:
             msg = f"For issue {issue_number} Fehler in Ladelauf ticket does not contain one attachment"
@@ -59,12 +68,16 @@ class ReportsFalsePositiveCheck(Task):
                 msg,
                 is_internal=True,
             )
+            logger.error(msg)
             raise Exception(msg)
 
         # rename the period to match sas folder
+        attachment_filename = ticket_jira.fields.attachment[0].filename[:-5]
+        # if we do not have anything in the steering table, try with its own name
         report_period = STEERING_TABLE_FOLDER_NAME.get(
-            ticket_jira.fields.attachment[0].filename[:-5], None
+            attachment_filename, attachment_filename
         )
+
         # get HTML attachment from the ticket
         report_attachment = ticket_jira.fields.attachment[0].get()
         tables = pd.read_html(io.StringIO(report_attachment.decode("utf-8")))
@@ -79,7 +92,13 @@ class ReportsFalsePositiveCheck(Task):
         )
 
         tasks_check = job_table[job_table["Status"] != 0]
+        tasks_amount = len(tasks_check)
+        tasks_checked = 0
+        # set status for non-success to change it inside
+        tasks_status = 0
         for _, row in tasks_check.iterrows():
+            logger.info(f"Searching {row['Jobname']}")
+
             # format string to the pattern from SAS logs
             file_date_pattern_str = row["Begin_Run_Timestamp"].strftime("%Y%m%d")
             # filter out all logs that do not match the string
@@ -88,6 +107,8 @@ class ReportsFalsePositiveCheck(Task):
                 filter_wildcard=f"{file_date_pattern_str}*.log",
             )
 
+            logger.info(f"Found {len(files)} files")
+
             # tricky to put all logs line in one array
             log = [
                 line
@@ -95,8 +116,10 @@ class ReportsFalsePositiveCheck(Task):
                 for line in server.get_file_content(file).decode("latin-1").splitlines()
             ]
 
-            # get content of file
-            job_name = row["Jobname"]
+            # get content of file (try to normalize it to match logs)
+            job_name = (
+                row["Jobname"].replace(" ", "").replace("- ", "").replace(" ", "_")
+            )
 
             # fancy way to get the next line with python at the same for
             for line, next_line in zip(log, log[1:] + log[:1]):
@@ -106,6 +129,7 @@ class ReportsFalsePositiveCheck(Task):
                     found_complete_job_line = job_name in next_line
                     if not found_complete_job_line:
                         msg = f"For issue {issue_number} logs are not in order, check manually"
+                        logger.error(msg)
                         raise Exception(msg)
 
                     status_pos = next_line.find("status=")
@@ -113,21 +137,30 @@ class ReportsFalsePositiveCheck(Task):
                     status = next_line[status_pos + 7 : -1]
 
                     if status == "0" or status == "1":
-                        comment = ":robot: The table finished with success"
-                        jira.transition_issue(
-                            jira_issue["issue"],
-                            # JiraTransitionCodes.CANCEL_REQUEST.value,
-                            JiraTransitionCodes.IN_PROGRESS.value,
-                        )
+                        comment = f":robot: The job {job_name} finished with success"
+                        tasks_status = 0 if tasks_status == 0 else tasks_status
                     else:
-                        comment = ":robot: The table finished with an error. Please, check it."
+                        tasks_status = 1
+                        comment = f":robot: The job {job_name} finished with an error. Please, check it."
 
                     jira.add_comment(
                         jira_issue["issue"],
                         comment,
                         is_internal=True,
                     )
-                    return True
+                    tasks_checked += 1
+                    break
+
+        # support for multiple tables check
+        if tasks_checked == tasks_amount:
+            if tasks_status == 0:
+                logger.info(f"Canceling ticket {issue_number}")
+                jira.transition_issue(
+                    jira_issue["issue"],
+                    JiraTransitionCodes.CANCEL_REQUEST.value,
+                )
+
+            return True
 
         # if it reached here, it is because it did not find the Table. Something is wrong check flow
         jira.add_comment(
