@@ -3,7 +3,7 @@ jobs:
     enabled: true
 
   ManualTriggerBIC:
-    enabled: true
+    enabled: false
 
   ThresholdExceeded:
     enabled: false
