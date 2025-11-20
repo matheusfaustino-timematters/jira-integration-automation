@@ -19,10 +19,13 @@ B1_DIR_REPORT_LOGS_PATH = "D:\\SAS\\Config\\Lev1\\SchedulingServer\\sasadmin\\"
 
 STEERING_TABLE_FOLDER_NAME = {
     "Reporting_Daily": "Report_Daily",
+    "Reporting_Monthly": "Report_Monthly",
     "MDM": "MDM_OSScheduler",
     "SPL": "SPL_OSScheduler",
     "SELFBI-DATAMART": "SelfBI_Datamart",
 }
+
+STEERING_TABLE_JOB_NAME = {"SLS_ZF_Global_Air_Freight_CO2": "SLS_ZF_Monthly_Shipments"}
 
 STATUS_IN_PROGRESS = "3"
 
@@ -55,10 +58,10 @@ class ReportsFalsePositiveCheck(Task):
         # update ticket information
         jira.assign_issue(jira_issue["issue"], JiraAssignUsers.MATHEUS.value)
         # id = 3 is In Progress as STATUS of the ticket (different than transition code)
-        # if ticket_jira.fields.status.id != STATUS_IN_PROGRESS:
-        #     jira.transition_issue(
-        #         jira_issue["issue"], JiraTransitionCodes.IN_PROGRESS.value
-        # )
+        if ticket_jira.fields.status.id != STATUS_IN_PROGRESS:
+            jira.transition_issue(
+                jira_issue["issue"], JiraTransitionCodes.IN_PROGRESS.value
+            )
 
         attachments = ticket_jira.fields.attachment
         if not len(attachments) == 1:
@@ -120,6 +123,8 @@ class ReportsFalsePositiveCheck(Task):
             job_name = (
                 row["Jobname"].replace(" ", "").replace("- ", "").replace(" ", "_")
             )
+            # workaround for inconsistent job's name in the logs and sas
+            job_name = STEERING_TABLE_JOB_NAME.get(job_name, job_name)
 
             # fancy way to get the next line with python at the same for
             for line, next_line in zip(log, log[1:] + log[:1]):
