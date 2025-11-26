@@ -18,7 +18,7 @@ from jira_integration.types import (
 B1_DIR_REPORT_LOGS_PATH = "D:\\SAS\\Config\\Lev1\\SchedulingServer\\sasadmin\\"
 
 STEERING_TABLE_FOLDER_NAME = {
-    "Reporting_Daily": "Report_Daily",
+    # "Reporting_Daily": "Report_Daily",
     "Reporting_Monthly": "Report_Monthly",
     "MDM": "MDM_OSScheduler",
     "SPL": "SPL_OSScheduler",
