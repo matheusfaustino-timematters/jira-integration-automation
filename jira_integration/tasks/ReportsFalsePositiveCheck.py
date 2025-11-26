@@ -23,6 +23,7 @@ STEERING_TABLE_FOLDER_NAME = {
     "MDM": "MDM_OSScheduler",
     "SPL": "SPL_OSScheduler",
     "SELFBI-DATAMART": "SelfBI_Datamart",
+    "CUBES": "Cubes_OSScheduler",
 }
 
 STEERING_TABLE_JOB_NAME = {"SLS_ZF_Global_Air_Freight_CO2": "SLS_ZF_Monthly_Shipments"}
