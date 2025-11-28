@@ -10,3 +10,6 @@ jobs:
 
   UPSReport:
     enabled: false
+
+  CancelCopyJobsTickets:
+    enabled: true
