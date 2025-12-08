@@ -124,6 +124,10 @@ class ReportsFalsePositiveCheck(Task):
             job_name = (
                 row["Jobname"].replace(" ", "").replace("- ", "").replace(" ", "_")
             )
+            is_data_mart_job = "data mart".lower() in row["Jobname"].lower()
+            if is_data_mart_job:
+                job_name = row["Jobname"].replace(" ", "_").replace("_-_", "_")
+
             # workaround for inconsistent job's name in the logs and sas
             job_name = STEERING_TABLE_JOB_NAME.get(job_name, job_name)
 
