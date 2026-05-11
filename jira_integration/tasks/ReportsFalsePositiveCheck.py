@@ -53,11 +53,18 @@ class ReportsFalsePositiveCheck(Task):
         logger.info(f"Running ReportsFalsePositiveCheck task on {jira_issue['issue']}")
         server: Server = ServerFactory.retrieve_server("tm-sasb1")
 
+        has_access = ReportsFalsePositiveCheck._ping()
+        if not has_access:
+            logger.info(
+                f"Running ReportsFalsePositiveCheck task on {jira_issue['issue']}: no VPN"
+            )
+            return False
+
         issue_number = jira_issue["issue"]
         ticket_jira = jira.issue(issue_number)
 
         # update ticket information
-        jira.assign_issue(jira_issue["issue"], JiraAssignUsers.MATHEUS.value)
+        # jira.assign_issue(jira_issue["issue"], JiraAssignUsers.MATHEUS.value)
         # id = 3 is In Progress as STATUS of the ticket (different than transition code)
         if ticket_jira.fields.status.id != STATUS_IN_PROGRESS:
             jira.transition_issue(
@@ -76,6 +83,10 @@ class ReportsFalsePositiveCheck(Task):
             raise Exception(msg)
 
         # rename the period to match sas folder
+        attachment_extension = ticket_jira.fields.attachment[0].filename[-5:]
+        if "pdf" in attachment_extension.lower():
+            return False
+
         attachment_filename = ticket_jira.fields.attachment[0].filename[:-5]
         # if we do not have anything in the steering table, try with its own name
         report_period = STEERING_TABLE_FOLDER_NAME.get(
@@ -178,5 +189,19 @@ class ReportsFalsePositiveCheck(Task):
             ":robot: Table not found in files I searched. Please, check manually check it and check robot flow",
             is_internal=True,
         )
+
+        return False
+
+    @staticmethod
+    def _ping() -> bool:
+        import requests
+
+        url = "http://tm-sasb1:8080/"
+        try:
+            resp = requests.options(url)
+            if resp.ok:
+                return True
+        except Exception as e:
+            logger.error(e)
 
         return False
