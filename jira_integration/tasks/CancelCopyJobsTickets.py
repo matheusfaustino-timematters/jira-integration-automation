@@ -59,7 +59,7 @@ class CancelCopyJobsTickets(Task):
         logger.info(f"{issue_number}: Canceling ticket")
         jira.add_comment(
             jira_issue["issue"],
-            "Checked Table_jobs and not late copy made.",
+            "Checked Table_jobs and it was not late.",
             is_internal=True,
         )
         jira.assign_issue(jira_issue["issue"], JiraAssignUsers.MATHEUS.value)
