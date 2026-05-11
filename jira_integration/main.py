@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from jira import JIRA
 from loguru import logger
+from pid import PidFile
 from task_manager import TaskManager
 
 from jira_integration.types import JiraTicket
@@ -63,4 +64,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    with PidFile("jira_integration_") as _:
+        main()

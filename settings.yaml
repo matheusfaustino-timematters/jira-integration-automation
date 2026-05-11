@@ -9,7 +9,7 @@ jobs:
     enabled: false
 
   UPSReport:
-    enabled: false
+    enabled: true
 
   CancelCopyJobsTickets:
     enabled: true
