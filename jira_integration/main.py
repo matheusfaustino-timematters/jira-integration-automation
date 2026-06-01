@@ -1,4 +1,6 @@
+import argparse
 import os
+from typing import cast
 
 from dotenv import load_dotenv
 from jira import JIRA
@@ -15,7 +17,20 @@ logger.add("jira_integration.log", rotation="50 MB")
 JIRA_PROJECT_KEY = "SDDM"
 
 
+class Argument(argparse.Namespace):
+    ticket: str | None
+
+
+def _args() -> Argument:
+    parse = argparse.ArgumentParser(description="Jira integration")
+    parse.add_argument("-t", "--ticket", type=str)
+
+    args = parse.parse_args()
+    return cast(Argument, args)
+
+
 def main():
+    args = _args()
     TaskManager.load_tasks()
 
     jira = JIRA(
@@ -29,9 +44,13 @@ def main():
     logger.info(
         f"Getting non-assigned tickets from {JIRA_PROJECT_KEY} and waiting for support"
     )
-    issues = jira.search_issues(
-        f"project={JIRA_PROJECT_KEY} AND assignee is EMPTY AND  status = 'Waiting for Support'"
-    )
+    if args and args.ticket:
+        issues = [jira.issue(args.ticket)]
+    else:
+        issues = jira.search_issues(
+            f"project={JIRA_PROJECT_KEY} AND assignee is EMPTY AND  status = 'Waiting for Support'"
+        )
+
     tasks_processed: set = set()
     for issue in issues:
         task = jira.issue(issue.key)
