@@ -22,9 +22,12 @@ class OldUnassignedTicket(Task):
         age_threshold = timedelta(
             minutes=int(os.environ["OLD_UNASSIGNED_TICKET_AGE_MINUTES"])
         )
-        age = datetime.now(timezone.utc) - jira_issue["created"]
+        now = datetime.now(timezone.utc)
+        age = now - jira_issue["created"]
+        is_weekday = now.weekday() < 5
         condition = (
-            jira_issue["creator_email"].lower() != EXCLUDED_CREATOR_EMAIL
+            is_weekday
+            and jira_issue["creator_email"].lower() != EXCLUDED_CREATOR_EMAIL
             and age >= age_threshold
         )
 
