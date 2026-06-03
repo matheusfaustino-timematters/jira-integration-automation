@@ -1,4 +1,5 @@
 import abc
+from datetime import datetime
 from enum import Enum
 from typing import Protocol, TypedDict
 
@@ -25,6 +26,8 @@ class JiraTicket(TypedDict):
     title: str
     description: str
     creator: str
+    creator_email: str
+    created: datetime
 
 
 class Task(Protocol):

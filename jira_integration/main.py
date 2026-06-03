@@ -1,5 +1,6 @@
 import argparse
 import os
+from datetime import datetime
 from typing import cast
 
 from dotenv import load_dotenv
@@ -64,8 +65,12 @@ def main():
         ticket: JiraTicket = {
             "issue": issue.key,
             "title": task.fields.summary,
-            "description": task.fields.description,
+            "description": task.fields.description or "",
             "creator": task.fields.reporter.displayName,
+            "creator_email": getattr(task.fields.reporter, "emailAddress", "") or "",
+            "created": datetime.strptime(
+                task.fields.created, "%Y-%m-%dT%H:%M:%S.%f%z"
+            ),
         }
 
         # @TODO update status
