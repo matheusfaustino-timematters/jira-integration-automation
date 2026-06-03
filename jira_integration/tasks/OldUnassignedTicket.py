@@ -73,7 +73,7 @@ class OldUnassignedTicket(Task):
             "@type": "MessageCard",
             "@context": "http://schema.org/extensions",
             "summary": f"Unassigned Jira ticket #{issue_key}",
-            "text": f"**{title}**\n\n[{issue_url}]({issue_url})",
+            "text": f"**{title}**\n\nUnassigned ticket found in [{issue_url}]({issue_url})",
         }
 
         try:
