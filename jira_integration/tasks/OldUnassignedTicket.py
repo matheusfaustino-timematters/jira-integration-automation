@@ -51,7 +51,9 @@ class OldUnassignedTicket(Task):
             return True
 
         issue_url = OldUnassignedTicket._build_issue_url(issue_key)
-        sent = OldUnassignedTicket._send_teams_message(jira_issue["title"], issue_url)
+        sent = OldUnassignedTicket._send_teams_message(
+            jira_issue["title"], issue_url, issue_key
+        )
         if not sent:
             return False
 
@@ -65,12 +67,12 @@ class OldUnassignedTicket(Task):
         return f"{base}/browse/{issue_key}"
 
     @staticmethod
-    def _send_teams_message(title: str, issue_url: str) -> bool:
+    def _send_teams_message(title: str, issue_url: str, issue_key: str) -> bool:
         webhook_url = os.environ["OLD_UNASSIGNED_TICKET_TEAMS_WEBHOOK_URL"]
         payload = {
             "@type": "MessageCard",
             "@context": "http://schema.org/extensions",
-            "summary": "Unassigned Jira ticket",
+            "summary": f"Unassigned Jira ticket #{issue_key}",
             "text": f"**{title}**\n\n[{issue_url}]({issue_url})",
         }
 
