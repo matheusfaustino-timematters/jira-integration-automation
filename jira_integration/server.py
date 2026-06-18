@@ -66,34 +66,36 @@ class LocalServer(Server):
     ) -> list[str]:
         path_dir = Path(directory)
         # like this for legacy and compatibility reasons
-        filter_wildcard = filter_wildcard if filter_wildcard else ""
-
+        filter_wildcard = filter_wildcard if filter_wildcard else "*"
         # used to cut some files
-        six_month_ago = datetime.now() - timedelta(days=6 * 30)
-        is_file_and_six_month_ago: Callable[[Path], bool] = (
-            lambda f: f.is_file() and f.stat().st_mtime > six_month_ago.timestamp()
-        )
+        six_month_ago = (datetime.now() - timedelta(days=6 * 30)).timestamp()
+        recent_files = []
+        for file in path_dir.rglob(filter_wildcard):
+            try:
+                st = file.stat()
+            except OSError:
+                continue
+            if st.st_mtime > six_month_ago:
+                recent_files.append((file, st.st_mtime))
 
-        recent_files = [
-            file
-            for file in path_dir.rglob(filter_wildcard)
-            if is_file_and_six_month_ago(file)
-        ]
-        sorted_files = sorted(
-            recent_files, key=lambda x: x.stat().st_mtime, reverse=True
-        )
+        sorted_files = sorted(recent_files, key=lambda x: x[1], reverse=True)
         groups_filename = defaultdict(list)
-        for file in sorted_files:
-            groups_filename[file.parent].append(file)
+        for file, mtime in sorted_files:
+            groups_filename[file.parent].append(str(file))
 
         most_recent_per_dir = [group for group in groups_filename.values()]
         if is_one_file_per_folder:
-            most_recent_per_dir = [
-                max(group, key=lambda x: x.stat().st_mtime)
-                for group in groups_filename.values()
-            ]
+            # yes, it is duplicated, but it is to be able to handle the per folder better
+            groups_filename = defaultdict(list)
+            for file, mtime in sorted_files:
+                groups_filename[file.parent].append((file, mtime))
 
-        return [str(file) for file in most_recent_per_dir]
+            most_recent_per_dir = [
+                max(group, key=lambda x: x[1])[0] for group in groups_filename.values()
+            ]
+            return [str(file) for file in most_recent_per_dir]
+
+        return [file for file in most_recent_per_dir]  # type: ignore
 
     def get_tasks_list_csv(self) -> pandas.DataFrame:
         raise NotImplementedError

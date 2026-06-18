@@ -118,8 +118,8 @@ class ReportsFalsePositiveCheck(Task):
             file_date_pattern_str = row["Begin_Run_Timestamp"].strftime("%Y%m%d")
             # filter out all logs that do not match the string
             files = server.get_list_of_files_ps(
-                f"{B1_DIR_REPORT_LOGS_PATH}Prod_ETL_{report_period}*\\",
-                filter_wildcard=f"{file_date_pattern_str}*.log",
+                f"{B1_DIR_REPORT_LOGS_PATH}",
+                filter_wildcard=f"Prod_ETL_{report_period}*\\{file_date_pattern_str}*.log",
             )
 
             logger.info(f"Found {len(files)} files")
