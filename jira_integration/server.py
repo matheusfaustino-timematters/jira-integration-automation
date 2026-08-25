@@ -1,4 +1,5 @@
 import abc
+import subprocess
 from calendar import month
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -117,7 +118,16 @@ class LocalServer(Server):
         ]
 
     def run_ps_cmd(self, command: str) -> bytes:
-        raise NotImplementedError
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            logger.error(
+                f"Local PowerShell command failed (code {result.returncode}): "
+                f"{result.stderr.decode('latin-1', errors='replace')}"
+            )
+        return result.stdout
 
 
 class WindowsServer(Server):

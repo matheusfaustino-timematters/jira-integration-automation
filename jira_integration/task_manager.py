@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from jira import JIRA
+from loguru import logger
 
 from jira_integration.types import JiraTicket, Task
 
@@ -29,7 +30,14 @@ class TaskManager(abc.ABC):
             task: Task = getattr(module, class_name)
 
             if task.can_handle(jira_issue):
-                executed = task.execute(jira, jira_issue)
+                try:
+                    executed = task.execute(jira, jira_issue)
+                except Exception:
+                    logger.exception(
+                        f"{class_name} raised while processing {jira_issue['issue']}"
+                    )
+                    executed = False
+
                 return_value = 0 if executed else 1
 
         return return_value
