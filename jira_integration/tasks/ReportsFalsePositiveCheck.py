@@ -30,6 +30,8 @@ STEERING_TABLE_JOB_NAME = {"SLS_ZF_Global_Air_Freight_CO2": "SLS_ZF_Monthly_Ship
 
 STATUS_IN_PROGRESS = "3"
 
+LEGACY_FALSE_POSITIVE_JOB_NAME = "TMCT_Datenpool"
+
 
 class ReportsFalsePositiveCheck(Task):
     @staticmethod
@@ -51,14 +53,6 @@ class ReportsFalsePositiveCheck(Task):
     @staticmethod
     def execute(jira: JIRA, jira_issue: JiraTicket) -> bool:
         logger.info(f"Running ReportsFalsePositiveCheck task on {jira_issue['issue']}")
-        server: Server = ServerFactory.retrieve_server("tm-sasb1")
-
-        has_access = ReportsFalsePositiveCheck._ping()
-        if not has_access:
-            logger.info(
-                f"Running ReportsFalsePositiveCheck task on {jira_issue['issue']}: no VPN"
-            )
-            return False
 
         issue_number = jira_issue["issue"]
         ticket_jira = jira.issue(issue_number)
@@ -107,6 +101,37 @@ class ReportsFalsePositiveCheck(Task):
         )
 
         tasks_check = job_table[job_table["Status"] != 0]
+
+        failing_job_names = {
+            str(name).strip().casefold() for name in tasks_check["Jobname"]
+        }
+        if failing_job_names and failing_job_names <= {
+            LEGACY_FALSE_POSITIVE_JOB_NAME.casefold()
+        }:
+            logger.info(
+                f"{issue_number}: only known legacy failure "
+                f"({LEGACY_FALSE_POSITIVE_JOB_NAME}) reported, closing ticket"
+            )
+            jira.add_comment(
+                jira_issue["issue"],
+                f":robot: Only {LEGACY_FALSE_POSITIVE_JOB_NAME} failed, which is a "
+                "decommissioned legacy job. Closing automatically.",
+                is_internal=True,
+            )
+            jira.transition_issue(
+                jira_issue["issue"], JiraTransitionCodes.CANCEL_REQUEST.value
+            )
+            return True
+
+        has_access = ReportsFalsePositiveCheck._ping()
+        if not has_access:
+            logger.info(
+                f"Running ReportsFalsePositiveCheck task on {jira_issue['issue']}: no VPN"
+            )
+            return False
+
+        server: Server = ServerFactory.retrieve_server("tm-sasb1")
+
         tasks_amount = len(tasks_check)
         tasks_checked = 0
         # set status for non-success to change it inside
