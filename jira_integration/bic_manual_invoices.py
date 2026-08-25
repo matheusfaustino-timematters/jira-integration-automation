@@ -145,6 +145,14 @@ def trigger_copy_and_send(server: Server) -> tuple[bool, str | None]:
 
 
 def run_copy_send_and_resolve(jira: JIRA, issue_key: str, server: Server) -> bool:
+    if is_past_ax_processing_cutoff():
+        jira.add_comment(
+            issue_key,
+            ":robot: Processed after the 10:00 AX cutoff - this may collide with the "
+            "other bot's run, please check manually.",
+            is_internal=True,
+        )
+
     is_success, failed_step = trigger_copy_and_send(server)
 
     if is_success:
