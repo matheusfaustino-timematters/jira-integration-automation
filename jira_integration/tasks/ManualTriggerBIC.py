@@ -1,26 +1,23 @@
-import csv
-import io
-import time as time_sleep
-from datetime import datetime, time
-
 from jira import JIRA
 from loguru import logger
 from server import Server, ServerFactory
 
-from jira_integration.settings import Settings
-from jira_integration.types import (
-    JiraAssignUsers,
-    JiraTicket,
-    JiraTransitionCodes,
-    Task,
+from jira_integration.bic_manual_invoices import (
+    NOTIFIED_MARKER,
+    MissingFile,
+    already_notified_desiree,
+    check_manual_files,
+    format_missing_files_comment,
+    format_missing_files_email_body,
+    load_manual_rows,
+    run_copy_send_and_resolve,
+    send_missing_files_email,
 )
+from jira_integration.settings import Settings
+from jira_integration.types import JiraTicket, JiraTransitionCodes, Task
 
-REPORTS_PATH = "\\SAS Reports"
-TASK_COPY_NAME = "AdHoc_SPL_BIC_5_Copy_Attachments"
-TASK_SEND_NAME = "AdHoc_SPL_BIC_6_Send_Attachments"
-
-CMD_TASK_RUN_STR = 'Start-ScheduledTask -TaskName "{task_name}" -TaskPath "{task_path}" | ConvertTo-Csv -NoTypeInformation'
-CMD_TASK_STATUS_STR = 'Get-ScheduledTask | Where-Object {{ $_.TaskPath -like "{task_path}\\*" -and $_.TaskName -eq  "{task_name}" }} | ConvertTo-Csv -NoTypeInformation'
+TICKET_TITLE = "Manual invoices AX sending in SPL_Invoices_for_BIC"
+STATUS_WAITING_FOR_SUPPORT = "Waiting for Support"
 
 
 class ManualTriggerBIC(Task):
@@ -29,9 +26,8 @@ class ManualTriggerBIC(Task):
         # get the manual info from the class
         task_settings = Settings.get_task_setting("ManualTriggerBIC")
         condition = (
-            "Manual invoices AX sending in SPL_Invoices_for_BIC".lower()
-            in jira_issue["title"].lower()
-            and time(8, 00) <= datetime.now().time() <= time(9, 55)
+            TICKET_TITLE.lower() in jira_issue["title"].lower()
+            and jira_issue["status"].lower() == STATUS_WAITING_FOR_SUPPORT.lower()
         )
 
         if condition and not task_settings["enabled"]:
@@ -44,62 +40,44 @@ class ManualTriggerBIC(Task):
 
     @staticmethod
     def execute(jira: JIRA, jira_issue: JiraTicket) -> bool:
-        logger.info(f"Running ManualTriggerBIC on ticket {jira_issue['issue']}")
+        issue_key = jira_issue["issue"]
+        logger.info(f"Running ManualTriggerBIC on ticket {issue_key}")
 
-        jira.assign_issue(jira_issue["issue"], JiraAssignUsers.MATHEUS.value)
-        jira.transition_issue(
-            jira_issue["issue"], JiraTransitionCodes.IN_PROGRESS.value
-        )
+        jira.transition_issue(issue_key, JiraTransitionCodes.IN_PROGRESS.value)
+
+        rows = load_manual_rows()
+        check = check_manual_files(rows)
+
+        if check.all_found:
+            logger.info(f"{issue_key}: all manual files found, triggering AX copy/send")
+            server: Server = ServerFactory.retrieve_server("tm-sasb1")
+            return run_copy_send_and_resolve(jira, issue_key, server)
+
+        logger.info(f"{issue_key}: {len(check.missing)} manual file(s) missing")
+        return ManualTriggerBIC._run_unhappy_path(jira, issue_key, check.missing)
+
+    @staticmethod
+    def _run_unhappy_path(
+        jira: JIRA, issue_key: str, missing: list[MissingFile]
+    ) -> bool:
         jira.add_comment(
-            jira_issue["issue"],
-            ":robot: BipBop is taking care of the issue",
+            issue_key,
+            format_missing_files_comment(missing),
             is_internal=True,
         )
 
-        server = ServerFactory.retrieve_server("tm-sasb1")
-
-        is_success = ManualTriggerBIC._run_tasks(server, TASK_COPY_NAME)
-        if not is_success:
-            # @TODO maybe do some error handling
-            return False
-
-        is_success = ManualTriggerBIC._run_tasks(server, TASK_SEND_NAME)
-        if is_success:
-            jira.add_comment(
-                jira_issue["issue"],
-                ":robot: BipBop finished task without errors",
-                is_internal=True,
+        if not already_notified_desiree(jira, issue_key):
+            sent = send_missing_files_email(
+                subject=f"[{issue_key}] Wrong file names in manual AX invoice attachments",
+                message=format_missing_files_email_body(missing),
             )
-            jira.transition_issue(
-                jira_issue["issue"], JiraTransitionCodes.RESOLVE_THIS_ISSUE.value
-            )
+            if sent:
+                jira.add_comment(issue_key, NOTIFIED_MARKER, is_internal=True)
+            else:
+                jira.add_comment(
+                    issue_key,
+                    ":robot: Failed to send notification email to Desiree, check manually",
+                    is_internal=True,
+                )
 
-        return is_success
-
-    @staticmethod
-    def _run_tasks(server: Server, task_name: str) -> bool:
-        logger.info(f"Running task '{task_name}'")
-
-        output_bytes = server.run_ps_cmd(
-            CMD_TASK_RUN_STR.format(task_name=task_name, task_path=REPORTS_PATH)
-        )
-
-        # assume running state because window cmd do not return anything when triggering the task on shell
-        state = "Running"
-        while state == "Running":
-            logger.info(f"Check if task '{task_name}' still running")
-            time_sleep.sleep(1)
-            output_bytes = server.run_ps_cmd(
-                CMD_TASK_STATUS_STR.format(task_name=task_name, task_path=REPORTS_PATH)
-            )
-            cmd_result = ManualTriggerBIC._get_result(output_bytes)
-            state = cmd_result["State"]
-
-        logger.info(f"Task '{task_name}' finished with status '{state}'")
-        return state == "Ready"
-
-    @staticmethod
-    def _get_result(output_bytes: bytes) -> dict:
-        # tricky to get the result from powershell in semi-organized way
-        output = csv.DictReader(io.StringIO(output_bytes.decode("latin-1")))
-        return next(output)
+        return True

@@ -3,7 +3,10 @@ jobs:
     enabled: true
 
   ManualTriggerBIC:
-    enabled: false
+    enabled: true
+
+  ManualTriggerBICPoll:
+    enabled: true
 
   ThresholdExceeded:
     enabled: false

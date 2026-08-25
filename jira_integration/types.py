@@ -28,6 +28,7 @@ class JiraTicket(TypedDict):
     creator: str
     creator_email: str
     created: datetime
+    status: str
 
 
 class Task(Protocol):
