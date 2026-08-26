@@ -4,13 +4,16 @@ from server import Server, ServerFactory
 
 from jira_integration.bic_manual_invoices import (
     NOTIFIED_MARKER,
+    TASK_UPDATE_AX_SENDING_NAME,
     MissingFile,
     already_notified_desiree,
     check_manual_files,
     format_missing_files_comment,
     format_missing_files_email_body,
+    is_manual_excel_up_to_date,
     load_manual_rows,
     run_copy_send_and_resolve,
+    run_update_ax_sending,
     send_missing_files_email,
 )
 from jira_integration.settings import Settings
@@ -45,12 +48,31 @@ class ManualTriggerBIC(Task):
 
         jira.transition_issue(issue_key, JiraTransitionCodes.IN_PROGRESS.value)
 
+        server: Server = ServerFactory.retrieve_server("tm-sasb1")
+
+        if not run_update_ax_sending(server):
+            jira.add_comment(
+                issue_key,
+                f":robot: Failed while running '{TASK_UPDATE_AX_SENDING_NAME}', "
+                "check the SAS scheduler manually",
+                is_internal=True,
+            )
+            return False
+
+        if not is_manual_excel_up_to_date():
+            jira.add_comment(
+                issue_key,
+                ":robot: SPL_Invoices_for_AX_Sending.xlsx was not updated for today, "
+                "check manually",
+                is_internal=True,
+            )
+            return False
+
         rows = load_manual_rows()
         check = check_manual_files(rows)
 
         if check.all_found:
             logger.info(f"{issue_key}: all manual files found, triggering AX copy/send")
-            server: Server = ServerFactory.retrieve_server("tm-sasb1")
             return run_copy_send_and_resolve(jira, issue_key, server)
 
         logger.info(f"{issue_key}: {len(check.missing)} manual file(s) missing")

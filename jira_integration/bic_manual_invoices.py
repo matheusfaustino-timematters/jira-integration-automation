@@ -23,6 +23,7 @@ STEERING_EXCEL_RELATIVE_PATH = "2_to_be_sent_to_AX/SPL_Invoices_for_AX_Sending.x
 MANUAL_ROOT_RELATIVE_PATH = "1_created_manually"
 
 REPORTS_PATH = "\\SAS Reports"
+TASK_UPDATE_AX_SENDING_NAME = "AdHoc_SPL_BIC_2_Update_AX_Sending"
 TASK_COPY_NAME = "AdHoc_SPL_BIC_5_Copy_Attachments"
 TASK_SEND_NAME = "AdHoc_SPL_BIC_6_Send_Attachments"
 
@@ -60,6 +61,12 @@ class ManualFilesCheck:
 
 def _attachments_root() -> Path:
     return Path(os.environ["SPL_BIC_ATTACHMENTS_ROOT"])
+
+
+def is_manual_excel_up_to_date() -> bool:
+    excel_path = _attachments_root() / STEERING_EXCEL_RELATIVE_PATH
+    modified_date = datetime.fromtimestamp(excel_path.stat().st_mtime, tz=BERLIN_TZ).date()
+    return modified_date == datetime.now(BERLIN_TZ).date()
 
 
 def load_manual_rows() -> list[ManualRow]:
@@ -131,6 +138,11 @@ def run_scheduled_task_and_wait(server: Server, task_name: str) -> bool:
 
     logger.info(f"Task '{task_name}' finished with status '{state}'")
     return state == "Ready"
+
+
+def run_update_ax_sending(server: Server) -> bool:
+    """Runs AdHoc_SPL_BIC_2, which refreshes the manual invoices Excel with new data."""
+    return run_scheduled_task_and_wait(server, TASK_UPDATE_AX_SENDING_NAME)
 
 
 def trigger_copy_and_send(server: Server) -> tuple[bool, str | None]:

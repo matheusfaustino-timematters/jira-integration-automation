@@ -3,10 +3,13 @@ from loguru import logger
 from server import Server, ServerFactory
 
 from jira_integration.bic_manual_invoices import (
+    TASK_UPDATE_AX_SENDING_NAME,
     check_manual_files,
+    is_manual_excel_up_to_date,
     is_past_ax_processing_cutoff,
     load_manual_rows,
     run_copy_send_and_resolve,
+    run_update_ax_sending,
 )
 from jira_integration.settings import Settings
 from jira_integration.types import JiraTicket, JiraTransitionCodes, Task
@@ -38,6 +41,26 @@ class ManualTriggerBICPoll(Task):
         issue_key = jira_issue["issue"]
         logger.info(f"Running ManualTriggerBICPoll on ticket {issue_key}")
 
+        server: Server = ServerFactory.retrieve_server("tm-sasb1")
+
+        if not run_update_ax_sending(server):
+            jira.add_comment(
+                issue_key,
+                f":robot: Failed while running '{TASK_UPDATE_AX_SENDING_NAME}', "
+                "check the SAS scheduler manually",
+                is_internal=True,
+            )
+            return False
+
+        if not is_manual_excel_up_to_date():
+            jira.add_comment(
+                issue_key,
+                ":robot: SPL_Invoices_for_AX_Sending.xlsx was not updated for today, "
+                "check manually",
+                is_internal=True,
+            )
+            return False
+
         rows = load_manual_rows()
         check = check_manual_files(rows)
 
@@ -45,7 +68,6 @@ class ManualTriggerBICPoll(Task):
             logger.info(
                 f"{issue_key}: all manual files now found, triggering AX copy/send"
             )
-            server: Server = ServerFactory.retrieve_server("tm-sasb1")
             return run_copy_send_and_resolve(jira, issue_key, server)
 
         if not is_past_ax_processing_cutoff():
