@@ -263,4 +263,5 @@ def send_missing_files_email(subject: str, message: str) -> bool:
         )
         return False
 
+    logger.info(f"Sent email to {EMAIL_TO_DESIREE}: {subject}")
     return True
