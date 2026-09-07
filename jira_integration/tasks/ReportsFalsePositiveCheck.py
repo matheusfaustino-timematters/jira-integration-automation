@@ -33,6 +33,16 @@ STATUS_IN_PROGRESS = "3"
 LEGACY_FALSE_POSITIVE_JOB_NAME = "TMCT_Datenpool"
 
 
+def _parse_status(x: object) -> int | None:
+    # pandas.read_html already returns int for a Status column that is all digits,
+    # and str only when it contains non-numeric values mixed in
+    if isinstance(x, int):
+        return x
+    if isinstance(x, str) and x.isdigit():
+        return int(x)
+    return None
+
+
 class ReportsFalsePositiveCheck(Task):
     @staticmethod
     def can_handle(jira_issue: JiraTicket) -> bool:
@@ -93,9 +103,7 @@ class ReportsFalsePositiveCheck(Task):
 
         # make basic transformation to be easier to filter out
         job_table = tables[1]
-        job_table["Status"] = job_table["Status"].apply(
-            lambda x: int(x) if x.isdigit() else None
-        )
+        job_table["Status"] = job_table["Status"].apply(_parse_status)
         job_table["Begin_Run_Timestamp"] = job_table["Begin_Run_Timestamp"].apply(
             lambda x: datetime.strptime(x, "%d%b%y:%H:%M:%S")
         )
