@@ -4,7 +4,8 @@ import os
 import subprocess
 import time as time_sleep
 from dataclasses import dataclass
-from datetime import datetime, time as dt_time
+from datetime import datetime
+from datetime import time as dt_time
 from difflib import get_close_matches
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -34,6 +35,7 @@ BERLIN_TZ = ZoneInfo("Europe/Berlin")
 AX_PROCESSING_CUTOFF = dt_time(10, 0)
 
 EMAIL_TO_DESIREE = "Desiree.Schaub@time-matters.com"
+EMAIL_CC_TEMP = "matheus.faustino@time-matters.com"
 NOTIFIED_MARKER = f"Notified {EMAIL_TO_DESIREE} about wrong file names"
 
 
@@ -65,7 +67,9 @@ def _attachments_root() -> Path:
 
 def is_manual_excel_up_to_date() -> bool:
     excel_path = _attachments_root() / STEERING_EXCEL_RELATIVE_PATH
-    modified_date = datetime.fromtimestamp(excel_path.stat().st_mtime, tz=BERLIN_TZ).date()
+    modified_date = datetime.fromtimestamp(
+        excel_path.stat().st_mtime, tz=BERLIN_TZ
+    ).date()
     return modified_date == datetime.now(BERLIN_TZ).date()
 
 
@@ -97,7 +101,9 @@ def check_manual_files(rows: list[ManualRow]) -> ManualFilesCheck:
             for ext in ATTACHMENT_EXTENSIONS
         )
         if found:
-            logger.info(f"Found manual file for invoice {row.invoice_no}: {row.file_name}")
+            logger.info(
+                f"Found manual file for invoice {row.invoice_no}: {row.file_name}"
+            )
             continue
 
         existing_names = (
@@ -197,7 +203,7 @@ def format_missing_files_comment(missing: list[MissingFile]) -> str:
     for m in missing:
         candidates = ", ".join(m.candidates) if m.candidates else "no close match found"
         lines.append(
-            f'- Invoice {m.row.invoice_no} (folder {m.row.folder}): expected '
+            f"- Invoice {m.row.invoice_no} (folder {m.row.folder}): expected "
             f'"{m.row.file_name}" - possible candidate(s): {candidates}'
         )
     return "\n".join(lines)
@@ -212,7 +218,9 @@ def format_missing_files_email_body(missing: list[MissingFile]) -> str:
         "",
     ]
     for m in missing:
-        current = m.candidates[0] if m.candidates else "(no matching file found on disk)"
+        current = (
+            m.candidates[0] if m.candidates else "(no matching file found on disk)"
+        )
         lines.append(f"- Folder {m.row.folder}, invoice {m.row.invoice_no}:")
         lines.append(f"    current file found: {current}")
         lines.append(f"    should be renamed to: {m.row.file_name}")
@@ -242,6 +250,8 @@ def send_missing_files_email(subject: str, message: str) -> bool:
         EMAIL_TO_DESIREE,
         "-cc",
         account,
+        # "-cc",
+        # EMAIL_CC_TEMP,
         "-from",
         account,
         "-sub",
