@@ -14,6 +14,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from jira import JIRA
 from loguru import logger
+from openpyxl import load_workbook
 from server import Server
 
 from jira_integration.types import JiraTransitionCodes
@@ -37,6 +38,7 @@ AX_PROCESSING_CUTOFF = dt_time(10, 0)
 EMAIL_TO_DESIREE = "Desiree.Schaub@time-matters.com"
 EMAIL_CC_TEMP = "matheus.faustino@time-matters.com"
 NOTIFIED_MARKER = f"Notified {EMAIL_TO_DESIREE} about wrong file names"
+SENT_MARKER = "Sent to AX: "
 
 
 @dataclass
@@ -54,6 +56,7 @@ class MissingFile:
 
 @dataclass
 class ManualFilesCheck:
+    found: list[ManualRow]
     missing: list[MissingFile]
 
     @property
@@ -73,6 +76,15 @@ def is_manual_excel_up_to_date() -> bool:
     return modified_date == datetime.now(BERLIN_TZ).date()
 
 
+def _normalize_invoice_no(value) -> str:
+    """Normalizes an InvoiceNo cell value so pandas (which upcasts a column with any
+    blank/NaN entries to float64) and openpyxl (which preserves the original int/str
+    type) always agree on the same string for the same invoice."""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def load_manual_rows() -> list[ManualRow]:
     excel_path = _attachments_root() / STEERING_EXCEL_RELATIVE_PATH
     logger.info(f"Reading manual rows from {excel_path}")
@@ -82,7 +94,7 @@ def load_manual_rows() -> list[ManualRow]:
 
     return [
         ManualRow(
-            invoice_no=str(row["InvoiceNo"]),
+            invoice_no=_normalize_invoice_no(row["InvoiceNo"]),
             file_name=str(row["file_name"]),
             folder=str(int(row["folder"])),
         )
@@ -92,18 +104,20 @@ def load_manual_rows() -> list[ManualRow]:
 
 def check_manual_files(rows: list[ManualRow]) -> ManualFilesCheck:
     manual_root = _attachments_root() / MANUAL_ROOT_RELATIVE_PATH
+    found: list[ManualRow] = []
     missing: list[MissingFile] = []
 
     for row in rows:
         folder_path = manual_root / row.folder
-        found = any(
+        file_found = any(
             (folder_path / f"{row.file_name}{ext}").exists()
             for ext in ATTACHMENT_EXTENSIONS
         )
-        if found:
+        if file_found:
             logger.info(
                 f"Found manual file for invoice {row.invoice_no}: {row.file_name}"
             )
+            found.append(row)
             continue
 
         existing_names = (
@@ -122,7 +136,7 @@ def check_manual_files(rows: list[ManualRow]) -> ManualFilesCheck:
         )
         missing.append(MissingFile(row=row, candidates=candidates))
 
-    return ManualFilesCheck(missing=missing)
+    return ManualFilesCheck(found=found, missing=missing)
 
 
 def run_scheduled_task_and_wait(server: Server, task_name: str) -> bool:
@@ -162,8 +176,76 @@ def trigger_copy_and_send(server: Server) -> tuple[bool, str | None]:
     return True, None
 
 
-def run_copy_send_and_resolve(jira: JIRA, issue_key: str, server: Server) -> bool:
+def trigger_copy_and_send_for_rows(
+    server: Server, rows_to_include: list[ManualRow]
+) -> tuple[bool, str | None]:
+    """Temporarily trims the steering Excel down to `rows_to_include` (plus all
+    non-manual rows), runs AdHoc_SPL_BIC_5/6 against that trimmed file, then restores
+    the original Excel so later checks still see every originally-expected row.
+
+    Uses openpyxl to delete rows in place (rather than rebuilding the workbook from a
+    pandas DataFrame) so other sheets and formatting survive the trim, and restores
+    from a raw byte backup so the restore is exact regardless."""
+    excel_path = _attachments_root() / STEERING_EXCEL_RELATIVE_PATH
+    original_bytes = excel_path.read_bytes()
+    include_invoices = {row.invoice_no for row in rows_to_include}
+
+    workbook = load_workbook(excel_path)
+    sheet = workbook.active
+    header = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+    creation_type_col = header.index("creation_type")
+    invoice_no_col = header.index("InvoiceNo")
+
+    rows_to_delete = [
+        row[0].row
+        for row in sheet.iter_rows(min_row=2)
+        if row[creation_type_col].value == MANUAL_CREATION_TYPE
+        and _normalize_invoice_no(row[invoice_no_col].value) not in include_invoices
+    ]
+
+    logger.info(
+        f"Trimming {excel_path}: keeping invoice(s) {sorted(include_invoices)}, "
+        f"dropping {len(rows_to_delete)} manual row(s) for this AX run"
+    )
+    for row_idx in reversed(rows_to_delete):
+        sheet.delete_rows(row_idx)
+
+    try:
+        workbook.save(excel_path)
+        logger.info(f"Triggering {TASK_COPY_NAME} / {TASK_SEND_NAME} against trimmed Excel")
+        result = trigger_copy_and_send(server)
+        logger.info(f"Copy/send for trimmed Excel finished with result {result}")
+        return result
+    finally:
+        excel_path.write_bytes(original_bytes)
+        logger.info(f"Restored {excel_path} to its original contents")
+
+
+def already_sent_invoices(
+    jira: JIRA, issue_key: str, comments: list | None = None
+) -> set[str]:
+    sent: set[str] = set()
+    for comment in comments if comments is not None else jira.comments(issue_key):
+        for line in comment.body.splitlines():
+            if SENT_MARKER in line:
+                after_marker = line.split(SENT_MARKER, 1)[1]
+                sent.update(
+                    invoice_no.strip()
+                    for invoice_no in after_marker.split(", ")
+                    if invoice_no.strip()
+                )
+    logger.info(f"{issue_key}: {len(sent)} invoice(s) already sent in previous cycle(s): {sorted(sent)}")
+    return sent
+
+
+def run_copy_send_for_rows(
+    jira: JIRA, issue_key: str, server: Server, rows_to_send: list[ManualRow]
+) -> bool:
+    invoice_list = ", ".join(row.invoice_no for row in rows_to_send)
+    logger.info(f"{issue_key}: running copy/send for invoice(s) {invoice_list}")
+
     if is_past_ax_processing_cutoff():
+        logger.warning(f"{issue_key}: running past the 10:00 AX cutoff")
         jira.add_comment(
             issue_key,
             ":robot: Processed after the 10:00 AX cutoff - this may collide with the "
@@ -171,16 +253,17 @@ def run_copy_send_and_resolve(jira: JIRA, issue_key: str, server: Server) -> boo
             is_internal=True,
         )
 
-    is_success, failed_step = trigger_copy_and_send(server)
+    is_success, failed_step = trigger_copy_and_send_for_rows(server, rows_to_send)
 
     if is_success:
+        logger.info(f"{issue_key}: successfully sent invoice(s) {invoice_list} to AX")
         jira.add_comment(
             issue_key,
-            ":robot: BipBop finished task without errors",
+            f":robot: {SENT_MARKER}{invoice_list}",
             is_internal=True,
         )
-        jira.transition_issue(issue_key, JiraTransitionCodes.RESOLVE_THIS_ISSUE.value)
     else:
+        logger.error(f"{issue_key}: copy/send failed while running '{failed_step}'")
         jira.add_comment(
             issue_key,
             f":robot: BipBop failed while running '{failed_step}', check the SAS scheduler manually",
@@ -190,12 +273,51 @@ def run_copy_send_and_resolve(jira: JIRA, issue_key: str, server: Server) -> boo
     return is_success
 
 
+def resolve_ticket_complete(jira: JIRA, issue_key: str) -> None:
+    logger.info(f"{issue_key}: all manual invoices sent, resolving")
+    jira.add_comment(
+        issue_key,
+        ":robot: BipBop finished task without errors",
+        is_internal=True,
+    )
+    jira.transition_issue(issue_key, JiraTransitionCodes.RESOLVE_THIS_ISSUE.value)
+
+
+def run_manual_invoices_cycle(
+    jira: JIRA, issue_key: str, server: Server, rows: list[ManualRow]
+) -> bool:
+    """Sends whatever manual invoices are currently found (skipping any already sent
+    in a previous cycle), notifies Desiree about anything still missing, and only
+    resolves the ticket once nothing is left missing."""
+    check = check_manual_files(rows)
+    comments = jira.comments(issue_key)
+    already_sent = already_sent_invoices(jira, issue_key, comments)
+    to_send = [row for row in check.found if row.invoice_no not in already_sent]
+
+    if to_send:
+        logger.info(f"{issue_key}: sending {len(to_send)} found manual invoice(s) to AX")
+        if not run_copy_send_for_rows(jira, issue_key, server, to_send):
+            return False
+
+    if check.missing:
+        logger.info(f"{issue_key}: {len(check.missing)} manual file(s) still missing")
+        return _run_missing_files_unhappy_path(jira, issue_key, check.missing, comments)
+
+    resolve_ticket_complete(jira, issue_key)
+    return True
+
+
 def is_past_ax_processing_cutoff() -> bool:
     return datetime.now(BERLIN_TZ).time() >= AX_PROCESSING_CUTOFF
 
 
-def already_notified_desiree(jira: JIRA, issue_key: str) -> bool:
-    return any(NOTIFIED_MARKER in c.body for c in jira.comments(issue_key))
+def already_notified_desiree(
+    jira: JIRA, issue_key: str, comments: list | None = None
+) -> bool:
+    return any(
+        NOTIFIED_MARKER in c.body
+        for c in (comments if comments is not None else jira.comments(issue_key))
+    )
 
 
 def format_missing_files_comment(missing: list[MissingFile]) -> str:
@@ -229,6 +351,35 @@ def format_missing_files_email_body(missing: list[MissingFile]) -> str:
     return "\n".join(lines)
 
 
+def _run_missing_files_unhappy_path(
+    jira: JIRA,
+    issue_key: str,
+    missing: list[MissingFile],
+    comments: list | None = None,
+) -> bool:
+    jira.add_comment(
+        issue_key,
+        format_missing_files_comment(missing),
+        is_internal=True,
+    )
+
+    if not already_notified_desiree(jira, issue_key, comments):
+        sent = send_missing_files_email(
+            subject=f"[{issue_key}] Wrong file names in manual AX invoice attachments",
+            message=format_missing_files_email_body(missing),
+        )
+        if sent:
+            jira.add_comment(issue_key, NOTIFIED_MARKER, is_internal=True)
+        else:
+            jira.add_comment(
+                issue_key,
+                ":robot: Failed to send notification email to Desiree, check manually",
+                is_internal=True,
+            )
+
+    return True
+
+
 def send_missing_files_email(subject: str, message: str) -> bool:
     load_dotenv(".env.local")
 
@@ -250,6 +401,9 @@ def send_missing_files_email(subject: str, message: str) -> bool:
         EMAIL_TO_DESIREE,
         "-cc",
         account,
+        # temporary
+        "-cc",
+        "Mariia.Krasnopolska@time-matters.com",
         # "-cc",
         # EMAIL_CC_TEMP,
         "-from",

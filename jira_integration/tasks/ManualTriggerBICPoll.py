@@ -3,10 +3,12 @@ from loguru import logger
 from server import Server, ServerFactory
 
 from jira_integration.bic_manual_invoices import (
+    already_sent_invoices,
     check_manual_files,
     is_past_ax_processing_cutoff,
     load_manual_rows,
-    run_copy_send_and_resolve,
+    resolve_ticket_complete,
+    run_copy_send_for_rows,
 )
 from jira_integration.settings import Settings
 from jira_integration.types import JiraTicket, JiraTransitionCodes, Task
@@ -40,13 +42,20 @@ class ManualTriggerBICPoll(Task):
 
         rows = load_manual_rows()
         check = check_manual_files(rows)
+        already_sent = already_sent_invoices(jira, issue_key)
+        to_send = [row for row in check.found if row.invoice_no not in already_sent]
 
-        if check.all_found:
+        if to_send:
             logger.info(
-                f"{issue_key}: all manual files now found, triggering AX copy/send"
+                f"{issue_key}: {len(to_send)} newly found manual invoice(s), sending to AX"
             )
             server: Server = ServerFactory.retrieve_server("tm-sasb1")
-            return run_copy_send_and_resolve(jira, issue_key, server)
+            if not run_copy_send_for_rows(jira, issue_key, server, to_send):
+                return False
+
+        if check.all_found:
+            resolve_ticket_complete(jira, issue_key)
+            return True
 
         if not is_past_ax_processing_cutoff():
             logger.info(
