@@ -36,7 +36,7 @@ BERLIN_TZ = ZoneInfo("Europe/Berlin")
 AX_PROCESSING_CUTOFF = dt_time(10, 0)
 
 EMAIL_TO_DESIREE = "Desiree.Schaub@time-matters.com"
-EMAIL_CC_TEMP = "matheus.faustino@time-matters.com"
+EMAIL_CC_AFTERMARKET_ADMIN = "tm.aftermarket.admin.dl@time-matters.com"
 NOTIFIED_MARKER = f"Notified {EMAIL_TO_DESIREE} about wrong file names"
 SENT_MARKER = "Sent to AX: "
 
@@ -401,11 +401,8 @@ def send_missing_files_email(subject: str, message: str) -> bool:
         EMAIL_TO_DESIREE,
         "-cc",
         account,
-        # temporary
         "-cc",
-        "Mariia.Krasnopolska@time-matters.com",
-        # "-cc",
-        # EMAIL_CC_TEMP,
+        EMAIL_CC_AFTERMARKET_ADMIN,
         "-from",
         account,
         "-sub",
