@@ -34,6 +34,7 @@ CMD_TASK_STATUS_STR = 'Get-ScheduledTask | Where-Object {{ $_.TaskPath -like "{t
 
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
 AX_PROCESSING_CUTOFF = dt_time(10, 0)
+EXCEL_SETTLE_DELAY_SECONDS = 3
 
 EMAIL_TO_DESIREE = "Desiree.Schaub@time-matters.com"
 EMAIL_CC_AFTERMARKET_ADMIN = "tm.aftermarket.admin.dl@time-matters.com"
@@ -165,9 +166,35 @@ def run_update_ax_sending(server: Server) -> bool:
     return run_scheduled_task_and_wait(server, TASK_UPDATE_AX_SENDING_NAME)
 
 
-def trigger_copy_and_send(server: Server) -> tuple[bool, str | None]:
+def _copied_files_missing(rows: list[ManualRow]) -> list[ManualRow]:
+    """AdHoc_SPL_BIC_5's VBScript traps its own errors (e.g. failing to open the
+    steering Excel) and exits with code 0 regardless, so Task Scheduler's State/
+    LastTaskResult can't tell us it actually failed - we have to check its output
+    (the copied, invoice-prefixed files) directly. See SDDM-9980/9981."""
+    target_folder = _attachments_root() / STEERING_EXCEL_RELATIVE_PATH.rsplit("/", 1)[0]
+    return [
+        row
+        for row in rows
+        if not any(
+            (target_folder / f"{row.invoice_no}_{row.file_name}{ext}").exists()
+            for ext in ATTACHMENT_EXTENSIONS
+        )
+    ]
+
+
+def trigger_copy_and_send(
+    server: Server, rows_to_include: list[ManualRow]
+) -> tuple[bool, str | None]:
     """Runs AdHoc_SPL_BIC_5 then, if it succeeds, AdHoc_SPL_BIC_6. Returns (success, failed_step)."""
     if not run_scheduled_task_and_wait(server, TASK_COPY_NAME):
+        return False, TASK_COPY_NAME
+
+    still_missing = _copied_files_missing(rows_to_include)
+    if still_missing:
+        logger.error(
+            f"{TASK_COPY_NAME} reported success but did not copy file(s) for invoice(s) "
+            f"{', '.join(row.invoice_no for row in still_missing)}"
+        )
         return False, TASK_COPY_NAME
 
     if not run_scheduled_task_and_wait(server, TASK_SEND_NAME):
@@ -212,8 +239,12 @@ def trigger_copy_and_send_for_rows(
 
     try:
         workbook.save(excel_path)
+        workbook.close()
+        # give the file a moment to fully release/settle (e.g. sync client re-locking it
+        # after the write) before the VBScript opens it via Excel COM - see SDDM-9980/9981
+        time_sleep.sleep(EXCEL_SETTLE_DELAY_SECONDS)
         logger.info(f"Triggering {TASK_COPY_NAME} / {TASK_SEND_NAME} against trimmed Excel")
-        result = trigger_copy_and_send(server)
+        result = trigger_copy_and_send(server, rows_to_include)
         logger.info(f"Copy/send for trimmed Excel finished with result {result}")
         return result
     finally:
