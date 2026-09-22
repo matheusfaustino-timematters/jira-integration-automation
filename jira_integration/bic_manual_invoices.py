@@ -23,6 +23,7 @@ MANUAL_CREATION_TYPE = "manual"
 ATTACHMENT_EXTENSIONS = (".xlsx", ".pdf")
 STEERING_EXCEL_RELATIVE_PATH = "2_to_be_sent_to_AX/SPL_Invoices_for_AX_Sending.xlsx"
 MANUAL_ROOT_RELATIVE_PATH = "1_created_manually"
+SENT_FOLDER_RELATIVE_PATH = "3_sent_to_AX"
 
 REPORTS_PATH = "\\SAS Reports"
 TASK_UPDATE_AX_SENDING_NAME = "AdHoc_SPL_BIC_2_Update_AX_Sending"
@@ -182,6 +183,21 @@ def _copied_files_missing(rows: list[ManualRow]) -> list[ManualRow]:
     ]
 
 
+def _unsent_files_missing(rows: list[ManualRow]) -> list[ManualRow]:
+    """AdHoc_SPL_BIC_6's batch script logs a per-file move failure but keeps going and
+    still exits 0 at the end, so - same issue as the copy step - we verify the file
+    actually landed in 3_sent_to_AX/<folder> instead of trusting the task's state."""
+    sent_root = _attachments_root() / SENT_FOLDER_RELATIVE_PATH
+    return [
+        row
+        for row in rows
+        if not any(
+            (sent_root / row.folder / f"{row.invoice_no}_{row.file_name}{ext}").exists()
+            for ext in ATTACHMENT_EXTENSIONS
+        )
+    ]
+
+
 def trigger_copy_and_send(
     server: Server, rows_to_include: list[ManualRow]
 ) -> tuple[bool, str | None]:
@@ -198,6 +214,14 @@ def trigger_copy_and_send(
         return False, TASK_COPY_NAME
 
     if not run_scheduled_task_and_wait(server, TASK_SEND_NAME):
+        return False, TASK_SEND_NAME
+
+    still_unsent = _unsent_files_missing(rows_to_include)
+    if still_unsent:
+        logger.error(
+            f"{TASK_SEND_NAME} reported success but did not move file(s) for invoice(s) "
+            f"{', '.join(row.invoice_no for row in still_unsent)}"
+        )
         return False, TASK_SEND_NAME
 
     return True, None
@@ -237,18 +261,25 @@ def trigger_copy_and_send_for_rows(
     for row_idx in reversed(rows_to_delete):
         sheet.delete_rows(row_idx)
 
+    # Build the trimmed file next to the original, then atomically swap it in with
+    # os.replace rather than opening/saving the live path directly - avoids ever leaving
+    # the file that the VBScript will open in a half-written or briefly-locked state.
+    trimmed_path = excel_path.with_name(f".{excel_path.name}.trimmed.tmp")
     try:
-        workbook.save(excel_path)
+        workbook.save(trimmed_path)
         workbook.close()
+        os.replace(trimmed_path, excel_path)
         # give the file a moment to fully release/settle (e.g. sync client re-locking it
-        # after the write) before the VBScript opens it via Excel COM - see SDDM-9980/9981
+        # after the swap) before the VBScript opens it via Excel COM - see SDDM-9980/9981
         time_sleep.sleep(EXCEL_SETTLE_DELAY_SECONDS)
         logger.info(f"Triggering {TASK_COPY_NAME} / {TASK_SEND_NAME} against trimmed Excel")
         result = trigger_copy_and_send(server, rows_to_include)
         logger.info(f"Copy/send for trimmed Excel finished with result {result}")
         return result
     finally:
-        excel_path.write_bytes(original_bytes)
+        restore_path = excel_path.with_name(f".{excel_path.name}.restore.tmp")
+        restore_path.write_bytes(original_bytes)
+        os.replace(restore_path, excel_path)
         logger.info(f"Restored {excel_path} to its original contents")
 
 
